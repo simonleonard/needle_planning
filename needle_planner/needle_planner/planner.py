@@ -27,11 +27,12 @@ class NeedlePlanningService(Node):
         # With stiffnesses of .02 and boundaries at 33 and 66 mm
         tissue_props = np.array([.02, .02, .02, 33, 66])
         predc = self.reg.predict(tissue_props.reshape(1, -1))
+        offset = request.target.z - predc[0, round(request.target.x * 5)]
         for i in range(10):
             p = Point32()
             p.x = float(i);
-            p.y = 0.0;
-            p.z = float(predc[0, round(i*5)]);
+            p.y = request.target.y;
+            p.z = float(predc[0, round(i * 5)] + offset);
             response.plan.polygon.points.append(p)
 
         return response
