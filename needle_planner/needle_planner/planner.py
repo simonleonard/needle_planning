@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from needle_planner_msgs.srv import NeedlePlan
 
 import rclpy
@@ -8,7 +10,10 @@ import numpy as np
 import pickle
 import os
 from ament_index_python.packages import get_package_share_directory
-
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import model_v4
+# from planner.scripts import model_v4
 
 class NeedlePlanningService(Node):
     
@@ -26,13 +31,33 @@ class NeedlePlanningService(Node):
         # The tissue_props defined here correspond to three layers of tissue
         # With stiffnesses of .02 and boundaries at 33 and 66 mm
         tissue_props = np.array([.02, .02, .02, 33, 66])
-        predc = self.reg.predict(tissue_props.reshape(1, -1))
-        offset = request.target.z - predc[0, round(request.target.x * 5)]
+        
+        # the needle insertion depts (mm) where the tissue stiffness changes
+        pos_vec = [ 10,  20,  30,  40,
+            50,  60, 70, 80, 90]
+        
+        # the stiffness of the tissue at each layer
+        stiffness_vec = [0.073, 0.025, 0.060, 0.04, 0.057,
+        0.075, 0.028, 0.072 , 0.056, 0.073]
+                
+        # the needle insertion depts (mm) where the guide position changes
+        guide_pos_ins = [ 10,  20,  30,  40,
+            50,  60, 70, 80, 90]
+        
+        # the position of the guide (mm)
+        guide_pos_vec = [ 0,  .2, .4,  1, .5,
+            0 , -.5,  -.5, -.5,  -.5]
+        
+        results = model_v4.run_main(stiffness_vec, pos_vec, guide_pos_vec, guide_pos_ins)
+        y_tip, y_disp, y_rxn, single_rand_vec, full_paths, full_rxns = results
+        # predc = self.reg.predict(tissue_props.reshape(1, -1))
+        predc = y_disp
+        offset = request.target.z - predc[round(request.target.x * 5)]
         for i in range(10):
             p = Point32()
             p.x = float(i);
             p.y = request.target.y;
-            p.z = float(predc[0, round(i * 5)] + offset);
+            p.z = float(predc[round(i * 5)] + offset);
             response.plan.polygon.points.append(p)
 
         return response
