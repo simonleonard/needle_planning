@@ -12,8 +12,9 @@ import os
 from ament_index_python.packages import get_package_share_directory
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-import model_v4
-# from planner.scripts import model_v4
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
 
 class NeedlePlanningService(Node):
     
@@ -27,37 +28,37 @@ class NeedlePlanningService(Node):
 
     def planning_callback(self, request, response):
         self.get_logger().info('Planning Request for target: %f %f %f' % (request.target.x, request.target.y, request.target.z ))
-        
-        # The tissue_props defined here correspond to three layers of tissue
-        # With stiffnesses of .02 and boundaries at 33 and 66 mm
-        tissue_props = np.array([.02, .02, .02, 33, 66])
-        
-        # the needle insertion depts (mm) where the tissue stiffness changes
-        pos_vec = [ 10,  20,  30,  40,
-            50,  60, 70, 80, 90]
-        
-        # the stiffness of the tissue at each layer
-        stiffness_vec = [0.073, 0.025, 0.060, 0.04, 0.057,
-        0.075, 0.028, 0.072 , 0.056, 0.073]
-                
-        # the needle insertion depts (mm) where the guide position changes
-        guide_pos_ins = [ 10,  20,  30,  40,
-            50,  60, 70, 80, 90]
-        
-        # the position of the guide (mm)
-        guide_pos_vec = [ 0,  .2, .4,  1, .5,
-            0 , -.5,  -.5, -.5,  -.5]
-        
-        results = model_v4.run_main(stiffness_vec, pos_vec, guide_pos_vec, guide_pos_ins)
-        y_tip, y_disp, y_rxn, single_rand_vec, full_paths, full_rxns = results
-        # predc = self.reg.predict(tissue_props.reshape(1, -1))
-        predc = y_disp
-        offset = request.target.z - predc[round(request.target.x * 5)]
-        for i in range(10):
+        # Needle should deflect the in the -x direction
+        start = [0,0,0]
+        end = [request.target.x, request.target.y, request.target.z]
+        mid = [ max(start[0] + .2, end[0] + .2), (start[1] + end[1]) * .5, end[2] * .4]
+        X = np.array([start, mid, end])
+
+        # Transform 3D points into 2D PCA space
+        pca = PCA(n_components=2)
+        X_pca = pca.fit_transform(X)
+
+        # Fit a trinomial to the 2D points
+        poly = PolynomialFeatures(degree=2)
+        X_poly = poly.fit_transform(X_pca[:, 0].reshape(-1, 1))
+        reg = LinearRegression().fit(X_poly, X_pca[:, 1])
+
+        # Generate trinomial curve for specific out_x values in PCA-transformed space
+        out_x = np.arange(0, end[2]+2, .5).reshape(-1, 1)
+        X_out_3D = np.column_stack((np.zeros(out_x.shape), np.zeros(out_x.shape), out_x))
+        X_out_pca = pca.transform(X_out_3D)
+        x_pca = X_out_pca[:, 0]
+        x_pca_poly = poly.transform(x_pca.reshape(-1, 1))
+        y_pca_pred = reg.predict(x_pca_poly)
+
+        curve_pca = np.column_stack((x_pca, y_pca_pred))
+        curve_3D = pca.inverse_transform(curve_pca)
+        for point in curve_3D:
             p = Point32()
-            p.x = float(i);
-            p.y = request.target.y;
-            p.z = float(predc[round(i * 5)] + offset);
+            p.x = float(point[0])
+            p.y = float(point[1])
+            p.z = float(point[2])
+            
             response.plan.polygon.points.append(p)
 
         return response
